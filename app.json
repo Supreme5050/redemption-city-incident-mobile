@@ -1,0 +1,33 @@
+{
+  "expo": {
+    "name": "Incident Management",
+    "slug": "incident-management-mobile",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "resizeMode": "contain",
+      "backgroundColor": "#020A17"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.incidentmanagement.mobile"
+    },
+    "android": {
+      "package": "com.incidentmanagement.mobile",
+      "adaptiveIcon": {
+        "backgroundColor": "#020A17"
+      }
+    },
+    "web": {
+      "bundler": "metro"
+    },
+    "plugins": [
+      "expo-asset"
+    ]
+  }
+}
