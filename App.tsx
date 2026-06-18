@@ -25,6 +25,7 @@ import {
   SubmitSuccessScreen
 } from './src/screens/CommandMobileScreens';
 import { createIncidentFromDraft, getIncidentById, loadMyIncidents } from './src/services/incidentService';
+import { subscribeToMyIncidentRealtime } from './src/services/realtimeService';
 import { createLostFoundRecord, loadLostFoundRecords } from './src/services/lostFoundService';
 import { Screen } from './src/components/Screen';
 import { colors } from './src/theme/colors';
@@ -95,6 +96,40 @@ export default function App() {
       mounted = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (authView !== 'app' || !currentUser) {
+      return undefined;
+    }
+
+    const unsubscribe = subscribeToMyIncidentRealtime(
+      currentUser.id,
+      ({ incidents: latestIncidents }) => {
+        setIncidents(latestIncidents);
+
+        setSelectedIncident((currentIncident) => {
+          if (!currentIncident) {
+            return latestIncidents[0] ?? null;
+          }
+
+          return latestIncidents.find((incident) => incident.id === currentIncident.id) ?? currentIncident;
+        });
+
+        setLastSubmittedIncident((currentIncident) => {
+          if (!currentIncident) {
+            return null;
+          }
+
+          return latestIncidents.find((incident) => incident.id === currentIncident.id) ?? currentIncident;
+        });
+      },
+      (error) => {
+        console.log('Realtime sync warning:', error.message);
+      }
+    );
+
+    return unsubscribe;
+  }, [authView, currentUser?.id]);
 
   async function bootAppData() {
     setIsLoading(true);
