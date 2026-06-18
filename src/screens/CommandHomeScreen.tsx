@@ -126,9 +126,9 @@ function getSmartAdvice(incidents: Incident[]) {
 }
 
 export function HomeScreen({ incidents, onNavigate, onStartReport, onOpenIncident }: HomeScreenProps) {
-  const activeCount = incidents.filter((item) => item.status !== 'Resolved').length;
-  const criticalCount = incidents.filter((item) => item.severity === 'Critical').length;
-  const resolvedCount = incidents.filter((item) => item.status === 'Resolved').length + 47;
+  const activeCount = incidents.filter((item) => item.status !== 'Resolved' && item.status !== 'Rejected').length;
+  const criticalCount = incidents.filter((item) => item.severity === 'Critical' && item.status !== 'Resolved' && item.status !== 'Rejected').length;
+  const resolvedCount = incidents.filter((item) => item.status === 'Resolved').length;
   const recentReports = useMemo(() => incidents.slice(0, 3), [incidents]);
   const smartAdvice = useMemo(() => getSmartAdvice(incidents), [incidents]);
 
@@ -167,9 +167,6 @@ export function HomeScreen({ incidents, onNavigate, onStartReport, onOpenInciden
 
           <TouchableOpacity activeOpacity={0.85} style={styles.bellButton} onPress={() => onNavigate('alerts')}>
             <Ionicons name="notifications-outline" size={22} color={C.white} />
-            <View style={styles.notificationBadge}>
-              <Text style={styles.notificationBadgeText}>3</Text>
-            </View>
           </TouchableOpacity>
         </View>
 
@@ -185,18 +182,24 @@ export function HomeScreen({ incidents, onNavigate, onStartReport, onOpenInciden
           </TouchableOpacity>
         </View>
 
-        <TouchableOpacity activeOpacity={0.9} style={styles.criticalBanner} onPress={() => recentReports[0] && onOpenIncident(recentReports[0])}>
-          <View style={styles.criticalIcon}>
-            <Ionicons name="warning" size={25} color={C.white} />
+        <TouchableOpacity
+          activeOpacity={0.9}
+          style={[styles.criticalBanner, criticalCount === 0 && styles.stableBanner]}
+          onPress={() => recentReports[0] && onOpenIncident(recentReports[0])}
+        >
+          <View style={[styles.criticalIcon, criticalCount === 0 && styles.stableIcon]}>
+            <Ionicons name={criticalCount > 0 ? 'warning' : 'shield-checkmark'} size={25} color={C.white} />
           </View>
 
           <View style={styles.flex}>
-            <Text style={styles.criticalTitle}>CRITICAL ALERT</Text>
-            <Text style={styles.criticalText}>Major incident reported. Avoid affected area.</Text>
+            <Text style={styles.criticalTitle}>{criticalCount > 0 ? 'CRITICAL ALERT' : 'SYSTEM STABLE'}</Text>
+            <Text style={styles.criticalText}>
+              {criticalCount > 0 ? 'Major incident reported. Avoid affected area.' : 'No critical incident reported from your live records.'}
+            </Text>
           </View>
 
           <View style={styles.criticalDivider} />
-          <Text style={styles.criticalAction}>VIEW</Text>
+          <Text style={styles.criticalAction}>{recentReports[0] ? 'VIEW' : 'OK'}</Text>
           <Ionicons name="chevron-forward" size={18} color={C.white} />
         </TouchableOpacity>
 
@@ -384,7 +387,7 @@ function BottomTabs({
     <View style={styles.tabBar}>
       <TabItem label="Home" icon="home" active={active === 'home'} onPress={() => onNavigate('home')} />
       <TabItem label="Reports" icon="clipboard-outline" active={active === 'reports'} onPress={() => onNavigate('my-reports')} />
-      <TabItem label="Alerts" icon="notifications" active={active === 'alerts'} badge onPress={() => onNavigate('alerts')} />
+      <TabItem label="Alerts" icon="notifications-outline" active={active === 'alerts'} onPress={() => onNavigate('alerts')} />
       <TabItem label="Map" icon="location" active={active === 'map'} onPress={() => onNavigate('map')} />
       <TabItem label="Profile" icon="person-outline" active={active === 'profile'} onPress={() => onNavigate('profile')} />
     </View>
@@ -395,25 +398,16 @@ function TabItem({
   label,
   icon,
   active,
-  badge,
   onPress
 }: {
   label: string;
   icon: keyof typeof Ionicons.glyphMap;
   active: boolean;
-  badge?: boolean;
   onPress: () => void;
 }) {
   return (
     <TouchableOpacity activeOpacity={0.85} style={styles.tabItem} onPress={onPress}>
-      <View>
-        <Ionicons name={icon} size={24} color={active ? C.blue : C.muted} />
-        {badge ? (
-          <View style={styles.tabBadge}>
-            <Text style={styles.tabBadgeText}>3</Text>
-          </View>
-        ) : null}
-      </View>
+      <Ionicons name={icon} size={24} color={active ? C.blue : C.muted} />
       <Text style={[styles.tabLabel, active && styles.tabLabelActive]}>{label}</Text>
     </TouchableOpacity>
   );
@@ -511,7 +505,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 18
   },
+  stableBanner: {
+    backgroundColor: '#06381F',
+    borderColor: 'rgba(35,209,96,0.45)'
+  },
   criticalIcon: { width: 44, height: 44, borderRadius: 14, backgroundColor: C.red, alignItems: 'center', justifyContent: 'center', marginRight: 11 },
+  stableIcon: { backgroundColor: C.green },
   criticalTitle: { color: C.white, fontSize: 14, fontWeight: '900' },
   criticalText: { color: '#F6D1D5', fontSize: 12, lineHeight: 16, marginTop: 2 },
   criticalDivider: { width: 1, height: 38, backgroundColor: 'rgba(255,255,255,0.2)', marginHorizontal: 9 },
@@ -604,8 +603,6 @@ const styles = StyleSheet.create({
     paddingBottom: 7
   },
   tabItem: { flex: 1, alignItems: 'center' },
-  tabBadge: { position: 'absolute', top: -9, right: -13, width: 21, height: 21, borderRadius: 11, backgroundColor: C.red, alignItems: 'center', justifyContent: 'center' },
-  tabBadgeText: { color: C.white, fontSize: 10, fontWeight: '900' },
   tabLabel: { color: C.muted, fontSize: 11.5, fontWeight: '700', marginTop: 3 },
   tabLabelActive: { color: C.blue }
 });

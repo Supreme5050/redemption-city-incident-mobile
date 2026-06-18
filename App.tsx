@@ -4,7 +4,7 @@ import { DraftIncident, Incident } from './src/types/incident';
 import { ScreenName } from './src/types/navigation';
 import { LostFoundDraft, LostFoundRecord } from './src/types/lostFound';
 import { AuthUser } from './src/types/auth';
-import { loadAuthSession } from './src/services/authService';
+import { loadAuthSession, signOutLocalAccount } from './src/services/authService';
 import { HomeScreen } from './src/screens/CommandHomeScreen';
 import { CommandMapScreen } from './src/screens/CommandMapScreen';
 import {
@@ -24,7 +24,7 @@ import {
   ReportStepTwoScreen,
   SubmitSuccessScreen
 } from './src/screens/CommandMobileScreens';
-import { createIncidentFromDraft, loadMyIncidents } from './src/services/incidentService';
+import { createIncidentFromDraft, getIncidentById, loadMyIncidents } from './src/services/incidentService';
 import { createLostFoundRecord, loadLostFoundRecords } from './src/services/lostFoundService';
 import { Screen } from './src/components/Screen';
 import { colors } from './src/theme/colors';
@@ -108,8 +108,32 @@ export default function App() {
       setIncidents(storedIncidents);
       setLostFoundRecords(storedLostFoundRecords);
       setSelectedIncident(storedIncidents[0] ?? null);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to load app data.';
+      Alert.alert('Data loading failed', message);
+      setIncidents([]);
+      setLostFoundRecords([]);
+      setSelectedIncident(null);
     } finally {
       setIsLoading(false);
+    }
+  }
+
+  async function refreshAppData() {
+    try {
+      const [storedIncidents, storedLostFoundRecords] = await Promise.all([
+        loadMyIncidents(),
+        loadLostFoundRecords()
+      ]);
+
+      setIncidents(storedIncidents);
+      setLostFoundRecords(storedLostFoundRecords);
+
+      return storedIncidents;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to refresh reports.';
+      Alert.alert('Refresh failed', message);
+      return incidents;
     }
   }
 
@@ -128,9 +152,45 @@ export default function App() {
     setActiveScreen('report-step-one');
   }
 
-  function openIncident(incident: Incident) {
-    setSelectedIncident(incident);
-    setActiveScreen('report-details');
+  async function openIncident(incident: Incident) {
+    try {
+      const freshIncident = await getIncidentById(incident.id);
+      const targetIncident = freshIncident ?? incident;
+
+      setSelectedIncident(targetIncident);
+      setIncidents((oldIncidents) =>
+        oldIncidents.map((item) => (item.id === targetIncident.id ? targetIncident : item))
+      );
+      setActiveScreen('report-details');
+    } catch (error) {
+      setSelectedIncident(incident);
+      setActiveScreen('report-details');
+    }
+  }
+
+  async function refreshSelectedIncident() {
+    if (!selectedIncident) {
+      return null;
+    }
+
+    try {
+      const freshIncident = await getIncidentById(selectedIncident.id);
+
+      if (!freshIncident) {
+        return selectedIncident;
+      }
+
+      setSelectedIncident(freshIncident);
+      setIncidents((oldIncidents) =>
+        oldIncidents.map((item) => (item.id === freshIncident.id ? freshIncident : item))
+      );
+
+      return freshIncident;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to refresh this report.';
+      Alert.alert('Refresh failed', message);
+      return selectedIncident;
+    }
   }
 
   function validateIncidentDraft() {
@@ -173,18 +233,42 @@ export default function App() {
       setLastSubmittedIncident(newIncident);
       setDraft(createEmptyDraft());
       setActiveScreen('submit-success');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to submit incident report.';
+      Alert.alert('Submit failed', message);
     } finally {
       setIsSubmitting(false);
     }
   }
 
   async function submitLostFound(draftPayload: LostFoundDraft) {
-    const record = await createLostFoundRecord(draftPayload);
-    const updatedRecords = await loadLostFoundRecords();
+    try {
+      const record = await createLostFoundRecord(draftPayload);
+      const updatedRecords = await loadLostFoundRecords();
 
-    setLostFoundRecords(updatedRecords);
+      setLostFoundRecords(updatedRecords);
 
-    return record;
+      return record;
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  async function handleSignOut() {
+    try {
+      await signOutLocalAccount();
+      setCurrentUser(null);
+      setIncidents([]);
+      setLostFoundRecords([]);
+      setSelectedIncident(null);
+      setLastSubmittedIncident(null);
+      setDraft(createEmptyDraft());
+      setActiveScreen('home');
+      setAuthView('welcome');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to sign out right now.';
+      Alert.alert('Sign out failed', message);
+    }
   }
 
   if (authView === 'splash') {
@@ -276,12 +360,19 @@ export default function App() {
         lostFoundRecords={lostFoundRecords}
         onNavigate={navigate}
         onOpenIncident={openIncident}
+        onRefresh={refreshAppData}
       />
     );
   }
 
   if (currentScreen === 'report-details' && selectedIncident) {
-    return <ReportDetailsScreen incident={selectedIncident} onNavigate={navigate} />;
+    return (
+      <ReportDetailsScreen
+        incident={selectedIncident}
+        onNavigate={navigate}
+        onRefreshIncident={refreshSelectedIncident}
+      />
+    );
   }
 
   if (currentScreen === 'alerts') {
@@ -303,7 +394,7 @@ export default function App() {
   }
 
   if (currentScreen === 'profile') {
-    return <ProfileScreen onNavigate={navigate} />;
+    return <ProfileScreen currentUser={currentUser} onNavigate={navigate} onSignOut={handleSignOut} />;
   }
 
   return (

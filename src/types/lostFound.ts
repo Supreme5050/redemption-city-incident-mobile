@@ -1,47 +1,58 @@
+import { EvidenceAttachment } from './incident';
+
 export type LostFoundMode = 'Lost Item' | 'Found Item';
+export type LostFoundReportType = LostFoundMode;
 
 export type LostFoundStatus =
-  | 'Submitted'
+  | 'Open'
   | 'Under Review'
   | 'Matched'
-  | 'Claim Verification'
-  | 'Ready for Handover'
-  | 'Closed';
+  | 'Claimed'
+  | 'Closed'
+  | 'Rejected';
 
 export interface LostFoundDraft {
-  mode: LostFoundMode;
+  mode?: LostFoundMode;
+  reportType?: LostFoundReportType;
   itemName: string;
   category: string;
-  locationLabel: string;
-  address: string;
-  latitude: number | null;
-  longitude: number | null;
   description: string;
-  contact: string;
+  locationLabel?: string;
+  location?: string;
+  address: string;
+  latitude?: number | null;
+  longitude?: number | null;
+  contact?: string;
+  reporterContact?: string;
+  anonymous?: boolean;
   imageUri?: string;
   photoLabel?: string;
+  attachments?: EvidenceAttachment[];
 }
 
 export interface LostFoundRecord {
   id: string;
   mode: LostFoundMode;
+  reportType: LostFoundReportType;
   itemName: string;
   category: string;
-  locationLabel: string;
-  address: string;
-  latitude: number | null;
-  longitude: number | null;
   description: string;
+  locationLabel: string;
+  location: string;
+  address: string;
+  latitude?: number | null;
+  longitude?: number | null;
+  status: LostFoundStatus;
+  reporterName: string;
   contact: string;
+  reporterContact: string;
+  anonymous: boolean;
   imageUri?: string;
   photoLabel?: string;
-  status: LostFoundStatus;
+  attachments: EvidenceAttachment[];
+  adminNote?: string;
   createdAt: string;
-  timeline: Array<{
-    id: string;
-    title: string;
-    description: string;
-    actor: string;
-    timestamp: string;
-  }>;
+  updatedAt: string;
 }
+
+export type LostFoundReport = LostFoundRecord;

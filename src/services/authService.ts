@@ -1,114 +1,181 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { AuthUser, ResetPasswordPayload, SignInPayload, SignUpPayload } from '../types/auth';
+import { AuthUser, ResetPasswordPayload, SignInPayload, SignUpPayload, UserRole } from '../types/auth';
+import { supabase } from '../lib/supabase';
 
-const AUTH_USERS_KEY = 'rcc_safety_auth_users';
-const AUTH_SESSION_KEY = 'rcc_safety_auth_session';
+type SupabaseProfile = {
+  id: string;
+  full_name: string;
+  email: string;
+  phone: string | null;
+  role: string;
+  created_at: string;
+};
 
-interface StoredAuthUser extends AuthUser {
-  password: string;
-}
-
-function normalize(value: string) {
+function normalizeEmail(value: string) {
   return value.trim().toLowerCase();
 }
 
-async function loadUsers(): Promise<StoredAuthUser[]> {
-  const raw = await AsyncStorage.getItem(AUTH_USERS_KEY);
-  return raw ? JSON.parse(raw) : [];
-}
-
-async function saveUsers(users: StoredAuthUser[]) {
-  await AsyncStorage.setItem(AUTH_USERS_KEY, JSON.stringify(users));
-}
-
-function removePassword(user: StoredAuthUser): AuthUser {
+function mapProfileToAuthUser(profile: SupabaseProfile): AuthUser {
   return {
-    id: user.id,
-    fullName: user.fullName,
-    email: user.email,
-    phone: user.phone,
-    role: user.role,
-    createdAt: user.createdAt
+    id: profile.id,
+    fullName: profile.full_name,
+    email: profile.email,
+    phone: profile.phone ?? '',
+    role: profile.role as UserRole,
+    createdAt: profile.created_at
   };
+}
+
+async function getProfileByUserId(userId: string): Promise<AuthUser | null> {
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('id, full_name, email, phone, role, created_at')
+    .eq('id', userId)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  if (!data) {
+    return null;
+  }
+
+  return mapProfileToAuthUser(data as SupabaseProfile);
 }
 
 export async function signUpLocalAccount(payload: SignUpPayload): Promise<AuthUser> {
-  const users = await loadUsers();
-
-  const email = normalize(payload.email);
+  const email = normalizeEmail(payload.email);
   const phone = payload.phone.trim();
+  const fullName = payload.fullName.trim();
 
-  const existingUser = users.find((user) => normalize(user.email) === email || user.phone === phone);
-
-  if (existingUser) {
-    throw new Error('An account already exists with this email or phone number.');
+  if (!fullName) {
+    throw new Error('Please enter your full name.');
   }
 
-  const newUser: StoredAuthUser = {
-    id: `USR-${Date.now()}`,
-    fullName: payload.fullName.trim(),
+  if (!email.includes('@')) {
+    throw new Error('Please enter a valid email address.');
+  }
+
+  if (!phone) {
+    throw new Error('Please enter your phone number.');
+  }
+
+  if (payload.password.length < 6) {
+    throw new Error('Password must be at least 6 characters.');
+  }
+
+  const { data, error } = await supabase.auth.signUp({
+    email,
+    password: payload.password,
+    options: {
+      data: {
+        full_name: fullName,
+        phone,
+        role: payload.role
+      }
+    }
+  });
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  if (!data.user) {
+    throw new Error('Account could not be created. Please try again.');
+  }
+
+  const profilePayload = {
+    id: data.user.id,
+    full_name: fullName,
     email,
     phone,
     role: payload.role,
-    password: payload.password,
-    createdAt: new Date().toISOString()
+    updated_at: new Date().toISOString()
   };
 
-  await saveUsers([newUser, ...users]);
+  const { error: profileError } = await supabase.from('profiles').upsert(profilePayload);
 
-  const sessionUser = removePassword(newUser);
-  await AsyncStorage.setItem(AUTH_SESSION_KEY, JSON.stringify(sessionUser));
+  if (profileError) {
+    throw new Error(profileError.message);
+  }
 
-  return sessionUser;
+  const profile = await getProfileByUserId(data.user.id);
+
+  if (!profile) {
+    throw new Error('Account was created, but profile could not be loaded.');
+  }
+
+  return profile;
 }
 
 export async function signInLocalAccount(payload: SignInPayload): Promise<AuthUser> {
-  const users = await loadUsers();
+  const identifier = payload.identifier.trim();
 
-  const identifier = normalize(payload.identifier);
-
-  const foundUser = users.find(
-    (user) => normalize(user.email) === identifier || user.phone.trim() === payload.identifier.trim()
-  );
-
-  if (!foundUser || foundUser.password !== payload.password) {
-    throw new Error('Invalid login details. Please check your email/phone and password.');
+  if (!identifier.includes('@')) {
+    throw new Error('For Supabase login, please sign in with your email address for now.');
   }
 
-  const sessionUser = removePassword(foundUser);
-  await AsyncStorage.setItem(AUTH_SESSION_KEY, JSON.stringify(sessionUser));
+  const email = normalizeEmail(identifier);
 
-  return sessionUser;
+  const { data, error } = await supabase.auth.signInWithPassword({
+    email,
+    password: payload.password
+  });
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  if (!data.user) {
+    throw new Error('Unable to sign in. Please try again.');
+  }
+
+  const profile = await getProfileByUserId(data.user.id);
+
+  if (!profile) {
+    throw new Error('Profile not found for this account.');
+  }
+
+  return profile;
 }
 
 export async function resetLocalPassword(payload: ResetPasswordPayload): Promise<void> {
-  const users = await loadUsers();
+  const identifier = payload.identifier.trim();
 
-  const identifier = normalize(payload.identifier);
-
-  const userIndex = users.findIndex(
-    (user) => normalize(user.email) === identifier || user.phone.trim() === payload.identifier.trim()
-  );
-
-  if (userIndex === -1) {
-    throw new Error('No account was found with this email or phone number.');
+  if (!identifier.includes('@')) {
+    throw new Error('Password recovery currently works with email only.');
   }
 
-  const updatedUsers = [...users];
+  const email = normalizeEmail(identifier);
 
-  updatedUsers[userIndex] = {
-    ...updatedUsers[userIndex],
-    password: payload.newPassword
-  };
+  const { error } = await supabase.auth.resetPasswordForEmail(email);
 
-  await saveUsers(updatedUsers);
+  if (error) {
+    throw new Error(error.message);
+  }
 }
 
 export async function loadAuthSession(): Promise<AuthUser | null> {
-  const raw = await AsyncStorage.getItem(AUTH_SESSION_KEY);
-  return raw ? JSON.parse(raw) : null;
+  const {
+    data: { session },
+    error
+  } = await supabase.auth.getSession();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  if (!session?.user) {
+    return null;
+  }
+
+  return getProfileByUserId(session.user.id);
 }
 
-export async function signOutLocalAccount() {
-  await AsyncStorage.removeItem(AUTH_SESSION_KEY);
+export async function signOutLocalAccount(): Promise<void> {
+  const { error } = await supabase.auth.signOut();
+
+  if (error) {
+    throw new Error(error.message);
+  }
 }

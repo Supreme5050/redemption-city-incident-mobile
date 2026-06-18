@@ -19,6 +19,7 @@ import MapView, { Marker, PROVIDER_GOOGLE, Region } from 'react-native-maps';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
 import { AppBrandLogo } from '../components/AppBrandLogo';
+import { AuthUser } from '../types/auth';
 import { DraftIncident, EvidenceAttachment, Incident, IncidentSeverity, IncidentType } from '../types/incident';
 import { ScreenName } from '../types/navigation';
 import { LostFoundDraft, LostFoundMode, LostFoundRecord } from '../types/lostFound';
@@ -194,9 +195,8 @@ function BrandHeader({
         </View>
 
         {right ?? (
-          <TouchableOpacity activeOpacity={0.85} style={styles.bellButton}>
+          <TouchableOpacity activeOpacity={0.85} style={styles.bellButton} >
             <Ionicons name="notifications-outline" size={24} color={C.text} />
-            <View style={styles.notificationDot} />
           </TouchableOpacity>
         )}
       </View>
@@ -215,7 +215,7 @@ function BottomTabs({
     <View style={styles.tabBar}>
       <TabItem label="Home" icon="home" active={active === 'home'} onPress={() => onNavigate('home')} />
       <TabItem label="Reports" icon="clipboard-outline" active={active === 'reports'} onPress={() => onNavigate('my-reports')} />
-      <TabItem label="Alerts" icon="notifications" active={active === 'alerts'} badge onPress={() => onNavigate('alerts')} />
+      <TabItem label="Alerts" icon="notifications-outline" active={active === 'alerts'} onPress={() => onNavigate('alerts')} />
       <TabItem label="Map" icon="location" active={active === 'map'} onPress={() => onNavigate('map')} />
       <TabItem label="Profile" icon="person-outline" active={active === 'profile'} onPress={() => onNavigate('profile')} />
     </View>
@@ -226,25 +226,16 @@ function TabItem({
   label,
   icon,
   active,
-  badge,
   onPress
 }: {
   label: string;
   icon: keyof typeof Ionicons.glyphMap;
   active: boolean;
-  badge?: boolean;
   onPress: () => void;
 }) {
   return (
     <TouchableOpacity activeOpacity={0.85} style={styles.tabItem} onPress={onPress}>
-      <View>
-        <Ionicons name={icon} size={25} color={active ? C.blue : C.muted} />
-        {badge ? (
-          <View style={styles.tabBadge}>
-            <Text style={styles.tabBadgeText}>3</Text>
-          </View>
-        ) : null}
-      </View>
+      <Ionicons name={icon} size={25} color={active ? C.blue : C.muted} />
       <Text style={[styles.tabLabel, active && styles.tabLabelActive]}>{label}</Text>
     </TouchableOpacity>
   );
@@ -663,7 +654,7 @@ export function SubmitSuccessScreen({
     <SafeAreaView style={styles.screen}>
       <StatusBar backgroundColor={C.bg} barStyle="light-content" />
 
-      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={styles.successScrollContent} showsVerticalScrollIndicator={false}>
         <BrandHeader title="Report Submitted" subtitle="Submission complete" />
 
         <Text style={styles.sectionCaps}>REPORT SUBMISSION</Text>
@@ -804,19 +795,169 @@ function DetailedAlertCard({ incident, onPress }: { incident: Incident; onPress:
   );
 }
 
-export function ReportDetailsScreen({ incident, onNavigate }: { incident: Incident; onNavigate: (screen: ScreenName) => void }) {
+
+const trackingStages: Array<{
+  status: IncidentStatus;
+  label: string;
+  icon: keyof typeof Ionicons.glyphMap;
+}> = [
+  { status: 'Submitted', label: 'Submitted', icon: 'send-outline' },
+  { status: 'In Review', label: 'Review', icon: 'eye-outline' },
+  { status: 'Verified', label: 'Verified', icon: 'checkmark-circle-outline' },
+  { status: 'Assigned', label: 'Assigned', icon: 'people-outline' },
+  { status: 'Responder En Route', label: 'En Route', icon: 'navigate-outline' },
+  { status: 'In Progress', label: 'In Progress', icon: 'construct-outline' },
+  { status: 'Resolved', label: 'Resolved', icon: 'shield-checkmark-outline' }
+];
+
+function getStatusStepIndex(status: IncidentStatus | string): number {
+  if (status === 'Rejected') return 1;
+  if (status === 'Open' || status === 'Submitted') return 0;
+  if (status === 'In Review') return 1;
+  if (status === 'Verified') return 2;
+  if (status === 'Assigned') return 3;
+  if (status === 'Responder En Route') return 4;
+  if (status === 'In Progress') return 5;
+  if (status === 'Resolved') return 6;
+  return 0;
+}
+
+function getStatusTone(status: IncidentStatus | string): string {
+  if (status === 'Resolved') return C.green;
+  if (status === 'Rejected') return C.red;
+  if (status === 'Critical') return C.red;
+  if (status === 'Responder En Route' || status === 'In Progress') return C.orange;
+  if (status === 'Assigned' || status === 'Verified' || status === 'In Review') return C.blue;
+  return C.muted;
+}
+
+function getTimelineTime(incident: Incident, status: IncidentStatus): string {
+  const item = incident.timeline.find((entry) => entry.status === status);
+
+  if (item?.timestamp) {
+    return item.timestamp;
+  }
+
+  if (status === 'Submitted') {
+    return incident.reportedAt;
+  }
+
+  return '--';
+}
+
+function getLatestTimelineItem(incident: Incident): IncidentTimelineItem {
+  return (
+    incident.timeline[incident.timeline.length - 1] ?? {
+      id: `${incident.id}-submitted`,
+      status: incident.status,
+      title: 'Report received',
+      description: 'Your report has been received by the Admin Control Desk.',
+      actor: 'System',
+      timestamp: incident.reportedAt
+    }
+  );
+}
+
+function getTrackingMessage(incident: Incident): string {
+  if (incident.status === 'Resolved') {
+    return 'This report has been resolved. You can still keep the report ID for future reference.';
+  }
+
+  if (incident.status === 'Rejected') {
+    return 'This report was rejected after review. Contact support if you believe this is wrong.';
+  }
+
+  if (incident.status === 'Assigned') {
+    return `${incident.assignedUnitName || 'A response body'} has been assigned to this case.`;
+  }
+
+  if (incident.status === 'Responder En Route') {
+    return 'A responder is on the way to the reported location.';
+  }
+
+  if (incident.status === 'In Progress') {
+    return 'The assigned team is currently working on this report.';
+  }
+
+  if (incident.status === 'Verified') {
+    return 'Admin has verified the report and it is ready for assignment.';
+  }
+
+  if (incident.status === 'In Review') {
+    return 'Admin Control Desk is reviewing the report details and evidence.';
+  }
+
+  return 'Admin Control Desk has received this report and will review it for routing.';
+}
+
+function getAttachmentUri(item: EvidenceAttachment): string | undefined {
+  const extended = item as EvidenceAttachment & {
+    url?: string;
+    publicUrl?: string;
+    storagePath?: string;
+  };
+
+  return extended.publicUrl || extended.url || item.uri;
+}
+
+function getAttachmentStatusText(item: EvidenceAttachment): string {
+  const extended = item as EvidenceAttachment & {
+    uploadStatus?: string;
+    uploadError?: string;
+  };
+
+  if (extended.uploadStatus === 'uploaded') return 'Uploaded';
+  if (extended.uploadStatus === 'failed') return 'Saved with upload warning';
+  if (extended.uploadStatus === 'skipped') return 'Attached locally';
+  return item.size || 'Attached';
+}
+
+export function ReportDetailsScreen({
+  incident,
+  onNavigate,
+  onRefreshIncident
+}: {
+  incident: Incident;
+  onNavigate: (screen: ScreenName) => void;
+  onRefreshIncident?: () => Promise<Incident | null>;
+}) {
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const display = getIncidentDisplay(incident.type);
   const severityColor = getSeverityColor(incident.severity);
+  const currentStepIndex = getStatusStepIndex(incident.status);
+  const latestTimeline = getLatestTimelineItem(incident);
+  const statusTone = getStatusTone(incident.status);
+
+  async function refreshIncident() {
+    if (!onRefreshIncident || isRefreshing) return;
+
+    setIsRefreshing(true);
+
+    try {
+      await onRefreshIncident();
+    } finally {
+      setIsRefreshing(false);
+    }
+  }
 
   return (
     <SafeAreaView style={styles.screen}>
       <StatusBar backgroundColor={C.bg} barStyle="light-content" />
 
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        <BrandHeader title="Report Detail" subtitle="Status tracking" onBack={() => onNavigate('my-reports')} />
+        <BrandHeader
+          title="Track Report"
+          subtitle="Live incident timeline"
+          onBack={() => onNavigate('my-reports')}
+          right={
+            <TouchableOpacity activeOpacity={0.85} style={styles.bellButton} onPress={refreshIncident}>
+              {isRefreshing ? <ActivityIndicator color={C.white} /> : <Ionicons name="refresh-outline" size={23} color={C.white} />}
+            </TouchableOpacity>
+          }
+        />
 
-        <View style={[styles.detailHero, { borderLeftColor: severityColor }]}>
-          <View style={[styles.detailHeroIcon, { backgroundColor: `${display.color}20` }]}>
+        <View style={[styles.detailHero, { borderLeftColor: severityColor }]}> 
+          <View style={[styles.detailHeroIcon, { backgroundColor: `${display.color}20` }]}> 
             <Ionicons name={display.icon} size={31} color={display.color} />
           </View>
 
@@ -825,42 +966,71 @@ export function ReportDetailsScreen({ incident, onNavigate }: { incident: Incide
             <Text style={styles.detailLocation}>
               <Ionicons name="location-outline" size={15} color={C.muted} /> {incident.location}
             </Text>
+            <View style={styles.detailStatusRow}>
+              <StatusPill label={incident.status.toUpperCase()} color={statusTone} />
+              <StatusPill label={getSeverityLabel(incident.severity)} color={severityColor} />
+            </View>
           </View>
+        </View>
 
-          <StatusPill label={getSeverityLabel(incident.severity)} color={severityColor} />
+        <View style={styles.reportIdCard}>
+          <View>
+            <Text style={styles.successLabel}>REPORT ID</Text>
+            <Text style={styles.successId}>{incident.id}</Text>
+          </View>
+          <View style={[styles.reportStatusIcon, { backgroundColor: `${statusTone}20`, borderColor: `${statusTone}60` }]}> 
+            <Ionicons name="analytics-outline" size={28} color={statusTone} />
+          </View>
         </View>
 
         <View style={styles.detailMetaBox}>
-          <MetaBlock label="Report ID" value={incident.id} />
           <MetaBlock label="Submitted" value={incident.reportedAt} />
-          <MetaBlock label="Reported By" value={incident.anonymous ? 'Anonymous' : 'You'} />
+          <MetaBlock label="Category" value={display.label} />
+          <MetaBlock label="Reporter" value={incident.anonymous ? 'Anonymous' : 'You'} />
         </View>
 
-        <Text style={styles.sectionCaps}>STATUS TRACKING</Text>
+        <Text style={styles.sectionCaps}>LIVE PROGRESS</Text>
         <View style={styles.trackingWrap}>
-          <TrackPoint active done label="Submitted" time={incident.timeline[0]?.timestamp ?? '--'} />
-          <TrackLine active />
-          <TrackPoint active done label="Under Review" time="Current" />
-          <TrackLine active={incident.status === 'Assigned' || incident.status === 'Responder En Route' || incident.status === 'Resolved'} />
-          <TrackPoint
-            active={incident.status === 'Assigned' || incident.status === 'Responder En Route' || incident.status === 'Resolved'}
-            label="Assigned"
-            time={incident.responseEta ?? '--'}
-          />
-          <TrackLine active={incident.status === 'Resolved'} dashed />
-          <TrackPoint active={incident.status === 'Resolved'} label="Resolved" time="--:--" />
+          {trackingStages.map((stage, index) => {
+            const isDone = incident.status === 'Resolved' ? index <= currentStepIndex : index < currentStepIndex;
+            const isActive = index <= currentStepIndex;
+
+            return (
+              <React.Fragment key={stage.status}>
+                <TrackPoint
+                  active={isActive}
+                  done={isDone}
+                  icon={stage.icon}
+                  label={stage.label}
+                  time={getTimelineTime(incident, stage.status)}
+                />
+                {index < trackingStages.length - 1 ? <TrackLine active={index < currentStepIndex} /> : null}
+              </React.Fragment>
+            );
+          })}
         </View>
 
-        <View style={styles.statusInfoCard}>
-          <Ionicons name="person-circle-outline" size={36} color={C.blue} />
+        <View style={[styles.statusInfoCard, { borderColor: `${statusTone}55` }]}> 
+          <Ionicons name="radio-outline" size={35} color={statusTone} />
           <View style={styles.flex}>
             <Text style={styles.statusInfoTitle}>{incident.status}</Text>
-            <Text style={styles.statusInfoText}>
-              {incident.assignedUnitName
-                ? `${incident.assignedUnitName} has been notified.`
-                : 'Admin Control Desk is reviewing this report before routing.'}
-            </Text>
+            <Text style={styles.statusInfoText}>{getTrackingMessage(incident)}</Text>
           </View>
+        </View>
+
+        <Text style={styles.sectionCaps}>TIMELINE LOG</Text>
+        <View style={styles.timelineLogCard}>
+          {incident.timeline.length > 0 ? (
+            incident.timeline.map((item, index) => (
+              <TimelineLogItem
+                key={item.id || `${item.status}-${index}`}
+                item={item}
+                isLast={index === incident.timeline.length - 1}
+              />
+            ))
+          ) : (
+            <TimelineLogItem item={latestTimeline} isLast />
+          )}
         </View>
 
         <Text style={styles.sectionCaps}>ASSIGNED RESPONSE BODY</Text>
@@ -874,7 +1044,7 @@ export function ReportDetailsScreen({ incident, onNavigate }: { incident: Incide
             <Text style={styles.responderName}>{incident.assignedUnitName || 'Pending assignment'}</Text>
             <Text style={styles.responderRole}>Verified camp response body</Text>
             <View style={styles.unitBadge}>
-              <Text style={styles.unitBadgeText}>{incident.assignedUnitName ? 'ASSIGNED' : 'PENDING'}</Text>
+              <Text style={styles.unitBadgeText}>{incident.assignedUnitName ? 'ASSIGNED' : 'PENDING ADMIN ROUTING'}</Text>
             </View>
           </View>
 
@@ -889,30 +1059,43 @@ export function ReportDetailsScreen({ incident, onNavigate }: { incident: Incide
           <Ionicons name="document-text-outline" size={30} color={C.muted} />
           <View style={styles.flex}>
             <Text style={styles.noteText}>{incident.description}</Text>
-            <Text style={styles.noteMeta}>Submitted by you • {incident.reportedAt}</Text>
+            <Text style={styles.noteMeta}>Submitted by {incident.anonymous ? 'Anonymous reporter' : 'you'} • {incident.reportedAt}</Text>
           </View>
         </View>
 
-        <Text style={styles.sectionCaps}>MEDIA</Text>
-        <View style={styles.mediaDetailRow}>
+        <Text style={styles.sectionCaps}>EVIDENCE</Text>
+        <View style={styles.evidenceListCard}>
           {incident.attachments.length > 0 ? (
-            incident.attachments.map((item) => (
-              <View key={item.id} style={styles.mediaDetailBox}>
-                {item.uri && item.type === 'Photo' ? <Image source={{ uri: item.uri }} style={styles.mediaDetailImage} /> : null}
-                <View style={styles.mediaCount}>
-                  <Ionicons name="image-outline" size={15} color={C.white} />
-                  <Text style={styles.mediaCountText}>1</Text>
+            incident.attachments.map((item) => {
+              const attachmentUri = getAttachmentUri(item);
+
+              return (
+                <View key={item.id} style={styles.evidenceRow}>
+                  <View style={styles.evidencePreviewBox}>
+                    {attachmentUri && item.type === 'Photo' ? (
+                      <Image source={{ uri: attachmentUri }} style={styles.evidencePreviewImage} />
+                    ) : (
+                      <Ionicons name={item.type === 'Video' ? 'videocam-outline' : 'document-outline'} size={26} color={C.blue} />
+                    )}
+                  </View>
+
+                  <View style={styles.flex}>
+                    <Text style={styles.evidenceName}>{item.name}</Text>
+                    <Text style={styles.evidenceMeta}>{item.type} • {getAttachmentStatusText(item)}</Text>
+                  </View>
+
+                  <Ionicons name="checkmark-circle-outline" size={22} color={C.green} />
                 </View>
-              </View>
-            ))
+              );
+            })
           ) : (
             <View style={styles.addMoreMedia}>
               <View style={styles.plusCircle}>
-                <Ionicons name="add" size={27} color={C.blue} />
+                <Ionicons name="image-outline" size={27} color={C.blue} />
               </View>
-              <View>
-                <Text style={styles.addMoreTitle}>No media attached</Text>
-                <Text style={styles.addMoreText}>Photos or videos help teams respond faster.</Text>
+              <View style={styles.flex}>
+                <Text style={styles.addMoreTitle}>No evidence attached</Text>
+                <Text style={styles.addMoreText}>Photos or videos help the Admin Control Desk verify reports faster.</Text>
               </View>
             </View>
           )}
@@ -920,31 +1103,51 @@ export function ReportDetailsScreen({ incident, onNavigate }: { incident: Incide
 
         <Text style={styles.sectionCaps}>LATEST UPDATE</Text>
         <View style={styles.latestUpdate}>
-          <View style={[styles.detailedIcon, { backgroundColor: `${C.purple}20` }]}>
-            <Ionicons name="shield-outline" size={27} color={C.purple} />
+          <View style={[styles.detailedIcon, { backgroundColor: `${statusTone}20`, borderColor: `${statusTone}60` }]}> 
+            <Ionicons name="pulse-outline" size={27} color={statusTone} />
           </View>
           <View style={styles.flex}>
-            <Text style={styles.latestTitle}>{incident.timeline[incident.timeline.length - 1]?.title ?? 'Report received'}</Text>
-            <Text style={styles.latestText}>
-              {incident.timeline[incident.timeline.length - 1]?.actor ?? 'Admin'} •{' '}
-              {incident.timeline[incident.timeline.length - 1]?.timestamp ?? 'Current'}
-            </Text>
+            <Text style={styles.latestTitle}>{latestTimeline.title}</Text>
+            <Text style={styles.latestDescription}>{latestTimeline.description}</Text>
+            <Text style={styles.latestText}>{latestTimeline.actor} • {latestTimeline.timestamp}</Text>
           </View>
         </View>
 
         <View style={styles.detailActions}>
-          <TouchableOpacity activeOpacity={0.9} style={styles.outlineHalf}>
-            <Ionicons name="chatbubble-outline" size={21} color={C.blue} />
-            <Text style={styles.outlineHalfText}>Contact Support</Text>
+          <TouchableOpacity activeOpacity={0.9} style={styles.outlineHalf} onPress={() => onNavigate('my-reports')}>
+            <Ionicons name="list-outline" size={21} color={C.blue} />
+            <Text style={styles.outlineHalfText}>All Reports</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity activeOpacity={0.9} style={styles.blueHalf}>
-            <Ionicons name="create-outline" size={21} color={C.white} />
-            <Text style={styles.blueHalfText}>Update Report</Text>
+          <TouchableOpacity activeOpacity={0.9} style={styles.blueHalf} onPress={refreshIncident}>
+            {isRefreshing ? <ActivityIndicator color={C.white} /> : <Ionicons name="refresh-outline" size={21} color={C.white} />}
+            <Text style={styles.blueHalfText}>{isRefreshing ? 'Refreshing...' : 'Refresh'}</Text>
           </TouchableOpacity>
         </View>
       </ScrollView>
     </SafeAreaView>
+  );
+}
+
+function TimelineLogItem({ item, isLast }: { item: IncidentTimelineItem; isLast: boolean }) {
+  const color = getStatusTone(item.status);
+
+  return (
+    <View style={styles.timelineLogRow}>
+      <View style={styles.timelineLogLeft}>
+        <View style={[styles.timelineLogDot, { backgroundColor: color }]} />
+        {!isLast ? <View style={styles.timelineLogLine} /> : null}
+      </View>
+
+      <View style={styles.flex}>
+        <View style={styles.timelineLogHeader}>
+          <Text style={styles.timelineLogTitle}>{item.title}</Text>
+          <Text style={styles.timelineLogTime}>{item.timestamp}</Text>
+        </View>
+        <Text style={styles.timelineLogDescription}>{item.description}</Text>
+        <Text style={styles.timelineLogActor}>{item.actor}</Text>
+      </View>
+    </View>
   );
 }
 
@@ -957,11 +1160,27 @@ function MetaBlock({ label, value }: { label: string; value: string }) {
   );
 }
 
-function TrackPoint({ active, done, label, time }: { active?: boolean; done?: boolean; label: string; time: string }) {
+function TrackPoint({
+  active,
+  done,
+  icon = 'person-outline',
+  label,
+  time
+}: {
+  active?: boolean;
+  done?: boolean;
+  icon?: keyof typeof Ionicons.glyphMap;
+  label: string;
+  time: string;
+}) {
   return (
     <View style={styles.trackPointWrap}>
       <View style={[styles.trackCircle, active && styles.trackCircleActive]}>
-        {done ? <Ionicons name="checkmark" size={18} color={C.green} /> : <Ionicons name="person-outline" size={18} color={active ? C.blue : C.muted2} />}
+        {done ? (
+          <Ionicons name="checkmark" size={18} color={C.green} />
+        ) : (
+          <Ionicons name={icon} size={18} color={active ? C.blue : C.muted2} />
+        )}
       </View>
       <Text style={[styles.trackLabel, active && styles.trackLabelActive]}>{label}</Text>
       <Text style={styles.trackTime}>{time}</Text>
@@ -973,25 +1192,173 @@ function TrackLine({ active, dashed }: { active?: boolean; dashed?: boolean }) {
   return <View style={[styles.trackLine, active && styles.trackLineActive, dashed && styles.trackLineDashed]} />;
 }
 
+function ReportTrackCard({ incident, onPress }: { incident: Incident; onPress: () => void }) {
+  const display = getIncidentDisplay(incident.type);
+  const severityColor = getSeverityColor(incident.severity);
+  const statusColor = getStatusTone(incident.status);
+  const stepIndex = getStatusStepIndex(incident.status);
+  const progressPercent = Math.max(12, Math.min(100, Math.round(((stepIndex + 1) / trackingStages.length) * 100)));
+  const latest = getLatestTimelineItem(incident);
+
+  return (
+    <TouchableOpacity activeOpacity={0.88} style={[styles.reportTrackCard, { borderLeftColor: severityColor }]} onPress={onPress}>
+      <View style={styles.reportTrackTop}>
+        <View style={[styles.detailedIcon, { backgroundColor: `${display.color}20`, borderColor: `${display.color}60` }]}> 
+          <Ionicons name={display.icon} size={28} color={display.color} />
+        </View>
+
+        <View style={styles.flex}>
+          <Text style={styles.detailedTitle}>{incident.title}</Text>
+          <Text style={styles.detailedMeta}>{incident.id} • {display.label}</Text>
+          <Text style={styles.detailedMeta}>
+            <Ionicons name="location-outline" size={13} color={C.muted} /> {incident.location}
+          </Text>
+        </View>
+
+        <View style={styles.alertRightCompact}>
+          <StatusPill label={incident.status.toUpperCase()} color={statusColor} />
+          <Text style={styles.alertTimeCompact}>{incident.reportedAt}</Text>
+        </View>
+      </View>
+
+      <View style={styles.reportProgressBlock}>
+        <View style={styles.reportProgressHeader}>
+          <Text style={styles.reportProgressLabel}>Tracking progress</Text>
+          <Text style={styles.reportProgressValue}>{progressPercent}%</Text>
+        </View>
+        <View style={styles.reportProgressTrack}>
+          <View style={[styles.reportProgressFill, { width: `${progressPercent}%`, backgroundColor: statusColor }]} />
+        </View>
+      </View>
+
+      <View style={styles.reportLatestRow}>
+        <Ionicons name="pulse-outline" size={16} color={statusColor} />
+        <Text style={styles.reportLatestText} numberOfLines={2}>{latest.title}: {latest.description}</Text>
+      </View>
+
+      <View style={styles.reportTrackFooter}>
+        <Text style={styles.reportTrackFooterText}>Tap to open full timeline</Text>
+        <Ionicons name="chevron-forward" size={18} color={C.blue} />
+      </View>
+    </TouchableOpacity>
+  );
+}
+
+function LostFoundTrackCard({ record }: { record: LostFoundRecord }) {
+  const color = record.mode === 'Lost Item' ? C.orange : C.purple;
+
+  return (
+    <View style={[styles.reportTrackCard, { borderLeftColor: color }]}>
+      <View style={styles.reportTrackTop}>
+        <View style={[styles.detailedIcon, { backgroundColor: `${color}20`, borderColor: `${color}60` }]}> 
+          <Ionicons name={record.mode === 'Lost Item' ? 'search-outline' : 'file-tray-full-outline'} size={29} color={color} />
+        </View>
+
+        <View style={styles.flex}>
+          <Text style={styles.detailedTitle}>{record.itemName}</Text>
+          <Text style={styles.detailedMeta}>{record.id} • {record.mode}</Text>
+          <Text style={styles.detailedMeta}>
+            <Ionicons name="location-outline" size={13} color={C.muted} /> {record.locationLabel}
+          </Text>
+        </View>
+
+        <StatusPill label={record.status.toUpperCase()} color={color} />
+      </View>
+
+      <Text style={styles.detailedDescription}>{record.description}</Text>
+      <View style={styles.reportLatestRow}>
+        <Ionicons name="shield-checkmark-outline" size={16} color={color} />
+        <Text style={styles.reportLatestText}>Admin can verify, match, claim, or close this record.</Text>
+      </View>
+    </View>
+  );
+}
+
+function EmptyReportsState({ onNavigate }: { onNavigate: (screen: ScreenName) => void }) {
+  return (
+    <View style={styles.emptyReportBox}>
+      <View style={styles.emptyReportIcon}>
+        <Ionicons name="clipboard-outline" size={32} color={C.blue} />
+      </View>
+      <Text style={styles.emptyReportTitle}>No reports yet</Text>
+      <Text style={styles.emptyReportText}>Submit an incident or Lost & Found report and it will appear here for tracking.</Text>
+      <TouchableOpacity activeOpacity={0.9} style={styles.blueButton} onPress={() => onNavigate('home')}>
+        <Ionicons name="add-circle-outline" size={22} color={C.white} />
+        <Text style={styles.blueButtonText}>Start a Report</Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
+
 export function MyReportsScreen({
   incidents,
   lostFoundRecords,
   onNavigate,
-  onOpenIncident
+  onOpenIncident,
+  onRefresh
 }: {
   incidents: Incident[];
   lostFoundRecords: LostFoundRecord[];
   onNavigate: (screen: ScreenName) => void;
   onOpenIncident: (incident: Incident) => void;
+  onRefresh?: () => Promise<Incident[]>;
 }) {
   const [filter, setFilter] = useState<'All' | 'Incidents' | 'Lost & Found'>('All');
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  const visibleIncidents = filter === 'All' || filter === 'Incidents' ? incidents : [];
+  const visibleLostFound = filter === 'All' || filter === 'Lost & Found' ? lostFoundRecords : [];
+  const totalVisibleReports = visibleIncidents.length + visibleLostFound.length;
+
+  const openCount = incidents.filter((item) => item.status !== 'Resolved' && item.status !== 'Rejected').length;
+  const resolvedCount = incidents.filter((item) => item.status === 'Resolved').length;
+  const criticalCount = incidents.filter((item) => item.severity === 'Critical' || item.severity === 'High').length;
+
+  async function refreshReports() {
+    if (!onRefresh || isRefreshing) return;
+
+    setIsRefreshing(true);
+
+    try {
+      await onRefresh();
+    } finally {
+      setIsRefreshing(false);
+    }
+  }
 
   return (
     <SafeAreaView style={styles.screen}>
       <StatusBar backgroundColor={C.bg} barStyle="light-content" />
 
       <ScrollView contentContainerStyle={styles.scrollContentCompact} showsVerticalScrollIndicator={false}>
-        <BrandHeader title="My Reports" subtitle="Track submitted cases" />
+        <BrandHeader
+          title="Track Reports"
+          subtitle="Live progress and case history"
+          right={
+            <TouchableOpacity activeOpacity={0.85} style={styles.bellButton} onPress={refreshReports}>
+              {isRefreshing ? <ActivityIndicator color={C.white} /> : <Ionicons name="refresh-outline" size={23} color={C.white} />}
+            </TouchableOpacity>
+          }
+        />
+
+        <View style={styles.trackSummaryGrid}>
+          <View style={styles.trackSummaryCard}>
+            <Text style={styles.trackSummaryValue}>{incidents.length + lostFoundRecords.length}</Text>
+            <Text style={styles.trackSummaryLabel}>Total cases</Text>
+          </View>
+          <View style={styles.trackSummaryCard}>
+            <Text style={[styles.trackSummaryValue, { color: C.orange }]}>{openCount}</Text>
+            <Text style={styles.trackSummaryLabel}>Active</Text>
+          </View>
+          <View style={styles.trackSummaryCard}>
+            <Text style={[styles.trackSummaryValue, { color: C.red }]}>{criticalCount}</Text>
+            <Text style={styles.trackSummaryLabel}>High risk</Text>
+          </View>
+          <View style={styles.trackSummaryCard}>
+            <Text style={[styles.trackSummaryValue, { color: C.green }]}>{resolvedCount}</Text>
+            <Text style={styles.trackSummaryLabel}>Resolved</Text>
+          </View>
+        </View>
 
         <View style={styles.filterRow}>
           {(['All', 'Incidents', 'Lost & Found'] as const).map((item) => (
@@ -1006,26 +1373,20 @@ export function MyReportsScreen({
           ))}
         </View>
 
-        {(filter === 'All' || filter === 'Incidents') &&
-          incidents.map((incident) => <DetailedAlertCard key={incident.id} incident={incident} onPress={() => onOpenIncident(incident)} />)}
+        {isRefreshing ? (
+          <View style={styles.refreshNotice}>
+            <ActivityIndicator color={C.blue} />
+            <Text style={styles.refreshNoticeText}>Refreshing reports...</Text>
+          </View>
+        ) : null}
 
-        {(filter === 'All' || filter === 'Lost & Found') &&
-          lostFoundRecords.map((record) => (
-            <View key={record.id} style={styles.lostFoundReportCard}>
-              <View style={[styles.detailedIcon, { backgroundColor: record.mode === 'Lost Item' ? `${C.orange}20` : `${C.purple}20` }]}>
-                <Ionicons name={record.mode === 'Lost Item' ? 'search-outline' : 'file-tray-full-outline'} size={29} color={record.mode === 'Lost Item' ? C.orange : C.purple} />
-              </View>
+        {totalVisibleReports === 0 ? <EmptyReportsState onNavigate={onNavigate} /> : null}
 
-              <View style={styles.flex}>
-                <Text style={styles.detailedTitle}>{record.itemName}</Text>
-                <Text style={styles.detailedMeta}>
-                  {record.id} • {record.mode} • {record.locationLabel}
-                </Text>
-                <Text style={styles.detailedDescription}>{record.description}</Text>
-                <StatusPill label={record.status} color={C.orange} />
-              </View>
-            </View>
-          ))}
+        {visibleIncidents.map((incident) => (
+          <ReportTrackCard key={incident.id} incident={incident} onPress={() => onOpenIncident(incident)} />
+        ))}
+
+        {visibleLostFound.map((record) => <LostFoundTrackCard key={record.id} record={record} />)}
       </ScrollView>
 
       <BottomTabs active="reports" onNavigate={onNavigate} />
@@ -1051,6 +1412,7 @@ export function LostFoundScreen({
   const [contact, setContact] = useState('');
   const [imageUri, setImageUri] = useState<string | undefined>(undefined);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submittedRecord, setSubmittedRecord] = useState<LostFoundRecord | null>(null);
 
   const [mapRegion, setMapRegion] = useState<Region>(DEFAULT_REGION);
 
@@ -1118,7 +1480,7 @@ export function LostFoundScreen({
     setIsSubmitting(true);
 
     try {
-      await onSubmitLostFound({
+      const record = await onSubmitLostFound({
         mode,
         itemName,
         category,
@@ -1132,12 +1494,7 @@ export function LostFoundScreen({
         photoLabel: imageUri ? 'Attached item photo' : undefined
       });
 
-      Alert.alert('Submitted', 'Your Lost & Found report has been submitted for admin review.', [
-        {
-          text: 'Track Report',
-          onPress: () => onNavigate('my-reports')
-        }
-      ]);
+      setSubmittedRecord(record);
 
       setItemName('');
       setCategory('Phone');
@@ -1148,9 +1505,75 @@ export function LostFoundScreen({
       setDescription('');
       setContact('');
       setImageUri(undefined);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to submit Lost & Found report.';
+      Alert.alert('Submit failed', message);
     } finally {
       setIsSubmitting(false);
     }
+  }
+
+  if (submittedRecord) {
+    return (
+      <SafeAreaView style={styles.screen}>
+        <StatusBar backgroundColor={C.bg} barStyle="light-content" />
+
+        <ScrollView contentContainerStyle={styles.successScrollContent} showsVerticalScrollIndicator={false}>
+          <BrandHeader title="Lost & Found Submitted" subtitle="Submission complete" onBack={() => onNavigate('home')} />
+
+          <Text style={styles.sectionCaps}>LOST & FOUND SUBMISSION</Text>
+
+          <View style={styles.successCard}>
+            <View style={styles.successIcon}>
+              <Ionicons name="checkmark" size={46} color={C.green} />
+            </View>
+
+            <Text style={styles.successTitle}>Item Report Submitted</Text>
+            <Text style={styles.successMessage}>Your Lost & Found report has been submitted for admin review.</Text>
+
+            <View style={styles.successDivider} />
+
+            <Text style={styles.successLabel}>REPORT ID</Text>
+            <Text style={styles.successId}>{submittedRecord.id}</Text>
+
+            <View style={styles.responseBox}>
+              <View style={styles.responseLeft}>
+                <View style={styles.responseIcon}>
+                  <Ionicons name="shield-checkmark-outline" size={27} color={C.green} />
+                </View>
+                <View>
+                  <Text style={styles.responseText}>Admin review</Text>
+                  <Text style={styles.responseTime}>Pending</Text>
+                </View>
+              </View>
+
+              <Text style={styles.responseNote}>The Admin Control Desk can verify, match, or close this record.</Text>
+            </View>
+          </View>
+
+          <Text style={styles.sectionCaps}>REPORT SUMMARY</Text>
+          <View style={styles.summaryBox}>
+            <SummaryRow icon={submittedRecord.mode === 'Lost Item' ? 'search-outline' : 'file-tray-full-outline'} color={submittedRecord.mode === 'Lost Item' ? C.orange : C.purple} label="Report Type" value={submittedRecord.mode} />
+            <SummaryRow icon="cube-outline" color={C.blue} label="Item" value={submittedRecord.itemName} />
+            <SummaryRow icon="location-outline" color={C.blue} label="Location" value={submittedRecord.locationLabel} />
+            <SummaryRow icon="shield-outline" color={C.green} label="Status" value={submittedRecord.status} badge />
+          </View>
+
+          <TouchableOpacity activeOpacity={0.9} style={styles.blueButton} onPress={() => onNavigate('my-reports')}>
+            <Ionicons name="analytics-outline" size={23} color={C.white} />
+            <Text style={styles.blueButtonText}>Track Report</Text>
+            <Ionicons name="chevron-forward" size={22} color={C.white} />
+          </TouchableOpacity>
+
+          <TouchableOpacity activeOpacity={0.9} style={styles.outlineButton} onPress={() => onNavigate('home')}>
+            <Ionicons name="home-outline" size={22} color={C.muted} />
+            <Text style={styles.outlineButtonText}>Back to Home</Text>
+          </TouchableOpacity>
+        </ScrollView>
+
+        <BottomTabs active="reports" onNavigate={onNavigate} />
+      </SafeAreaView>
+    );
   }
 
   return (
@@ -1319,7 +1742,21 @@ export function LostFoundScreen({
   );
 }
 
-export function ProfileScreen({ onNavigate }: { onNavigate: (screen: ScreenName) => void }) {
+export function ProfileScreen({
+  currentUser,
+  onNavigate,
+  onSignOut
+}: {
+  currentUser: AuthUser | null;
+  onNavigate: (screen: ScreenName) => void;
+  onSignOut: () => void;
+}) {
+  const displayName = currentUser?.fullName?.trim() || 'Safety Reporter';
+  const displayRole = currentUser?.role || 'Reporter';
+  const displayEmail = currentUser?.email || 'No email found';
+  const displayPhone = currentUser?.phone || 'No phone number found';
+  const joinedDate = currentUser?.createdAt ? new Date(currentUser.createdAt).toLocaleDateString() : 'Recently created';
+
   return (
     <SafeAreaView style={styles.screen}>
       <StatusBar backgroundColor={C.bg} barStyle="light-content" />
@@ -1330,31 +1767,32 @@ export function ProfileScreen({ onNavigate }: { onNavigate: (screen: ScreenName)
         <View style={styles.profileHero}>
           <AppBrandLogo size="large" />
 
-          <Text style={styles.profileName}>Safety Reporter</Text>
-          <Text style={styles.profileRole}>Redemption City Safety Command</Text>
+          <Text style={styles.profileName}>{displayName}</Text>
+          <Text style={styles.profileRole}>{displayRole} • Redemption City Safety Command</Text>
 
           <View style={styles.profileBadge}>
             <View style={styles.commandHeaderDot} />
-            <Text style={styles.profileBadgeText}>VERIFIED DEVICE</Text>
+            <Text style={styles.profileBadgeText}>VERIFIED REPORTER</Text>
           </View>
         </View>
 
         <View style={styles.profileList}>
-          <ProfileRow icon="person-outline" title="Reporter Type" value="Resident / Visitor" color={C.blue} />
-          <ProfileRow icon="call-outline" title="Contact" value="Add phone number later" color={C.green} />
+          <ProfileRow icon="person-outline" title="Reporter Type" value={displayRole} color={C.blue} />
+          <ProfileRow icon="mail-outline" title="Email" value={displayEmail} color={C.green} />
+          <ProfileRow icon="call-outline" title="Phone" value={displayPhone} color={C.orange} />
           <ProfileRow icon="shield-outline" title="Privacy" value="Anonymous reporting supported" color={C.purple} />
-          <ProfileRow icon="notifications-outline" title="Alerts" value="Safety updates enabled" color={C.orange} />
+          <ProfileRow icon="calendar-outline" title="Joined" value={joinedDate} color={C.blue} />
         </View>
 
         <View style={styles.helpCard}>
           <View style={styles.helpIcon}>
-            <Ionicons name="information-circle-outline" size={29} color={C.blue} />
+            <Ionicons name="checkmark-circle-outline" size={29} color={C.green} />
           </View>
 
           <View style={styles.flex}>
-            <Text style={styles.helpTitle}>Account note</Text>
+            <Text style={styles.helpTitle}>Account active</Text>
             <Text style={styles.helpText}>
-              This profile is currently local/demo. When Supabase is connected, user accounts, password recovery, and admin roles will become real backend features.
+              Your profile is connected to your real reporter account. Your incident reports, Lost & Found records, and contact details are now linked to this account.
             </Text>
           </View>
         </View>
@@ -1362,6 +1800,11 @@ export function ProfileScreen({ onNavigate }: { onNavigate: (screen: ScreenName)
         <TouchableOpacity activeOpacity={0.9} style={styles.outlineButton} onPress={() => onNavigate('home')}>
           <Ionicons name="home-outline" size={22} color={C.muted} />
           <Text style={styles.outlineButtonText}>Back to Home</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity activeOpacity={0.9} style={[styles.outlineButton, styles.signOutButton]} onPress={onSignOut}>
+          <Ionicons name="log-out-outline" size={22} color={C.red} />
+          <Text style={[styles.outlineButtonText, { color: C.red }]}>Sign Out</Text>
         </TouchableOpacity>
       </ScrollView>
 
@@ -1382,7 +1825,11 @@ function ProfileRow({
   color: string;
 }) {
   return (
-    <View style={styles.profileRow}>
+    <TouchableOpacity
+      activeOpacity={0.85}
+      style={styles.profileRow}
+      onPress={() => Alert.alert(title, value)}
+    >
       <View style={[styles.profileRowIcon, { backgroundColor: `${color}20`, borderColor: `${color}60` }]}>
         <Ionicons name={icon} size={24} color={color} />
       </View>
@@ -1393,7 +1840,7 @@ function ProfileRow({
       </View>
 
       <Ionicons name="chevron-forward" size={20} color={C.muted} />
-    </View>
+    </TouchableOpacity>
   );
 }
 
@@ -1408,7 +1855,12 @@ const styles = StyleSheet.create({
   scrollContent: {
     paddingTop: HEADER_TOP,
     paddingHorizontal: 16,
-    paddingBottom: 44
+    paddingBottom: 120
+  },
+  successScrollContent: {
+    paddingTop: HEADER_TOP,
+    paddingHorizontal: 16,
+    paddingBottom: 150
   },
   scrollContentCompact: {
     paddingTop: HEADER_TOP,
@@ -2735,5 +3187,294 @@ const styles = StyleSheet.create({
     color: C.muted,
     fontSize: 12,
     marginTop: 3
-  }
+  },
+
+  detailStatusRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 7,
+    marginTop: 10
+  },
+  reportIdCard: {
+    borderRadius: 20,
+    backgroundColor: C.card,
+    borderWidth: 1,
+    borderColor: C.border,
+    padding: 15,
+    marginBottom: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between'
+  },
+  reportStatusIcon: {
+    width: 54,
+    height: 54,
+    borderRadius: 18,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
+  timelineLogCard: {
+    borderRadius: 20,
+    backgroundColor: C.card,
+    borderWidth: 1,
+    borderColor: C.border,
+    padding: 14,
+    marginBottom: 16
+  },
+  timelineLogRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    minHeight: 76
+  },
+  timelineLogLeft: {
+    width: 22,
+    alignItems: 'center',
+    marginRight: 10
+  },
+  timelineLogDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    marginTop: 5
+  },
+  timelineLogLine: {
+    width: 2,
+    flex: 1,
+    backgroundColor: C.borderStrong,
+    marginTop: 5
+  },
+  timelineLogHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 10
+  },
+  timelineLogTitle: {
+    flex: 1,
+    color: C.text,
+    fontSize: 14,
+    fontWeight: '900'
+  },
+  timelineLogTime: {
+    color: C.muted,
+    fontSize: 10.5,
+    fontWeight: '800',
+    textAlign: 'right',
+    maxWidth: 120
+  },
+  timelineLogDescription: {
+    color: C.muted,
+    fontSize: 12.5,
+    lineHeight: 18,
+    marginTop: 5
+  },
+  timelineLogActor: {
+    color: C.blue,
+    fontSize: 11.5,
+    fontWeight: '900',
+    marginTop: 6
+  },
+  latestDescription: {
+    color: C.muted,
+    fontSize: 12.5,
+    lineHeight: 18,
+    marginTop: 4
+  },
+  evidenceListCard: {
+    borderRadius: 20,
+    backgroundColor: C.card,
+    borderWidth: 1,
+    borderColor: C.border,
+    padding: 12,
+    marginBottom: 16
+  },
+  evidenceRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 9,
+    borderBottomWidth: 1,
+    borderBottomColor: C.border,
+    gap: 10
+  },
+  evidencePreviewBox: {
+    width: 54,
+    height: 54,
+    borderRadius: 16,
+    backgroundColor: C.card2,
+    borderWidth: 1,
+    borderColor: C.borderStrong,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden'
+  },
+  evidencePreviewImage: {
+    width: '100%',
+    height: '100%'
+  },
+  evidenceName: {
+    color: C.text,
+    fontSize: 13.5,
+    fontWeight: '900'
+  },
+  evidenceMeta: {
+    color: C.muted,
+    fontSize: 11.5,
+    fontWeight: '700',
+    marginTop: 4
+  },
+  reportTrackCard: {
+    borderRadius: 20,
+    backgroundColor: C.card,
+    borderWidth: 1,
+    borderColor: C.border,
+    borderLeftWidth: 4,
+    padding: 13,
+    marginBottom: 12
+  },
+  reportTrackTop: {
+    flexDirection: 'row',
+    alignItems: 'flex-start'
+  },
+  reportProgressBlock: {
+    marginTop: 13,
+    gap: 7
+  },
+  reportProgressHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between'
+  },
+  reportProgressLabel: {
+    color: C.muted,
+    fontSize: 11.5,
+    fontWeight: '900'
+  },
+  reportProgressValue: {
+    color: C.text,
+    fontSize: 11.5,
+    fontWeight: '900'
+  },
+  reportProgressTrack: {
+    height: 7,
+    borderRadius: 999,
+    backgroundColor: C.card2,
+    overflow: 'hidden'
+  },
+  reportProgressFill: {
+    height: '100%',
+    borderRadius: 999
+  },
+  reportLatestRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 7,
+    marginTop: 12,
+    backgroundColor: 'rgba(255,255,255,0.035)',
+    borderRadius: 14,
+    padding: 10
+  },
+  reportLatestText: {
+    flex: 1,
+    color: C.muted,
+    fontSize: 12,
+    lineHeight: 17,
+    fontWeight: '700'
+  },
+  reportTrackFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 11,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: C.border
+  },
+  reportTrackFooterText: {
+    color: C.blue,
+    fontSize: 12,
+    fontWeight: '900'
+  },
+  trackSummaryGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginBottom: 14
+  },
+  trackSummaryCard: {
+    width: '47.8%',
+    borderRadius: 18,
+    backgroundColor: C.card,
+    borderWidth: 1,
+    borderColor: C.border,
+    padding: 13
+  },
+  trackSummaryValue: {
+    color: C.blue,
+    fontSize: 24,
+    fontWeight: '900',
+    letterSpacing: -0.5
+  },
+  trackSummaryLabel: {
+    color: C.muted,
+    fontSize: 11.5,
+    fontWeight: '800',
+    marginTop: 5
+  },
+  refreshNotice: {
+    borderRadius: 16,
+    backgroundColor: C.card,
+    borderWidth: 1,
+    borderColor: C.border,
+    padding: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    marginBottom: 12
+  },
+  refreshNoticeText: {
+    color: C.muted,
+    fontSize: 12,
+    fontWeight: '800'
+  },
+  emptyReportBox: {
+    borderRadius: 22,
+    backgroundColor: C.card,
+    borderWidth: 1,
+    borderColor: C.border,
+    padding: 18,
+    alignItems: 'center',
+    marginTop: 12,
+    marginBottom: 16
+  },
+  emptyReportIcon: {
+    width: 62,
+    height: 62,
+    borderRadius: 22,
+    backgroundColor: C.blueSoft,
+    borderWidth: 1,
+    borderColor: 'rgba(47,128,255,0.35)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 12
+  },
+  emptyReportTitle: {
+    color: C.text,
+    fontSize: 18,
+    fontWeight: '900',
+    marginBottom: 6
+  },
+  emptyReportText: {
+    color: C.muted,
+    fontSize: 13,
+    lineHeight: 19,
+    textAlign: 'center',
+    marginBottom: 12
+  },
+  signOutButton: {
+    borderColor: 'rgba(255,77,79,0.45)',
+    backgroundColor: 'rgba(255,77,79,0.08)'
+  },
+
 });
